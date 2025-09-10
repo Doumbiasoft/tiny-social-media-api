@@ -1,7 +1,8 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
-
+import { apiReference } from "@scalar/express-api-reference";
+import swaggerUi from "swagger-ui-express";
 /**
  * Truly dynamic OpenAPI generator that scans controllers directory
  * and discovers @reflet routes automatically without manual configuration
@@ -571,7 +572,6 @@ export const setupDynamicOpenAPI = async (
   // Add Scalar UI
   if (enableScalar) {
     try {
-      const { apiReference } = require("@scalar/express-api-reference");
       app.use(
         docsPath,
         apiReference({
@@ -589,8 +589,6 @@ export const setupDynamicOpenAPI = async (
   // Add Swagger UI
   if (enableSwagger) {
     try {
-      const swaggerUi = require("swagger-ui-express");
-
       const swaggerSetup = async (req: any, res: any, next: any) => {
         const spec = await generateDynamicOpenAPISpec(controllersDir);
         req.swaggerDoc = spec;
