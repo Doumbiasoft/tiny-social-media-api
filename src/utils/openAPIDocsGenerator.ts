@@ -514,8 +514,8 @@ export const generateDynamicOpenAPISpec = async (controllersDir?: string) => {
     openapi: "3.0.0",
     info: {
       version: "1.0.0",
-      title: "Dynamic API",
-      description: `RESTful API with automatic OpenAPI generation - ${allRoutes.length} endpoints discovered from ${controllerFiles.length} controllers`,
+      title: "Tiny Social Media API",
+      description: `RESTful API - ${allRoutes.length} endpoints from ${controllerFiles.length} controllers`,
     },
     paths: {} as any,
   };

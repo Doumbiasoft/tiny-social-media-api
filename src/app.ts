@@ -33,6 +33,7 @@ async function setupApp() {
     swaggerPath: "/swagger", // Swagger UI (traditional, feature-rich)
     enableSwagger: true, // Enable Swagger UI
     enableScalar: true, // Enable Scalar UI
+  
   });
 
   // Global error handler (⚡ must be last)
