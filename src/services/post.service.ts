@@ -12,7 +12,7 @@ export const findPostById = (postId: number) => {
 export const createPost = (post: Partial<db.Post>) => {
   const newPost: Partial<db.Post> = {
     id: db.posts[db.posts.length - 1].id + 1,
-    userId: post.userId,
+    userId: Number(post.userId),
     title: post.title,
     content: post.content,
   };
