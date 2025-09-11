@@ -337,6 +337,7 @@ http://localhost:PORT/api
 
 ### 📋 Posts List View
 
+![Posts List View](./src/assets/images/tiny-social-media-web-view.png)
 **URL**: `/api/v1/views/posts`
 **Method**: GET
 
@@ -485,14 +486,13 @@ tiny-social-media-api/
 ```
 
 ### Key Configuration Features:
+
 - **🎯 Target**: ES2020 for modern JavaScript features
 - **📦 Module**: CommonJS for Node.js compatibility
 - **📁 Directories**: Source in `src/`, output in `dist/`
 - **🔒 Strict Mode**: Full TypeScript strict checking enabled
 - **🎭 Decorators**: Experimental decorators for @reflet/express
 - **📋 Includes**: Only compiles files in `src/` directory
-
-
 
 ## 🤔 Project Reflection
 
