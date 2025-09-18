@@ -133,7 +133,7 @@ class PostController {
       rules: [
         {
           field: "id",
-          required: false,
+          required: true,
           type: "string",
         },
       ],
