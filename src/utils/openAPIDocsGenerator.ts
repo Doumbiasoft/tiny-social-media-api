@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
-import { apiReference } from "@scalar/express-api-reference";
+//import { apiReference } from "@scalar/express-api-reference";
 import swaggerUi from "swagger-ui-express";
 /**
  * Truly dynamic OpenAPI generator that scans controllers directory
@@ -78,6 +78,88 @@ async function discoverControllers(
     console.error("Error discovering controllers:", error);
     return [];
   }
+}
+
+/**
+ * Extract endpoint metadata from compiled @Use decorator content
+ */
+function extractCompiledEndpointMetadata(useContent: string):
+  | {
+      summary?: string;
+      description?: string;
+      tags?: string[];
+      operationId?: string;
+    }
+  | undefined {
+  const metadata: any = {};
+
+  // Extract endpointMetadata object from compiled format
+  const metadataMatch = useContent.match(
+    /endpointMetadata_middleware_1\.endpointMetadata\)\(\{\s*([\s\S]*?)\}\)/
+  );
+  if (metadataMatch) {
+    const objectContent = metadataMatch[1];
+
+    // Extract summary from the object
+    const summaryMatch = objectContent.match(/summary:\s*["'](.*?)["']/);
+    if (summaryMatch) metadata.summary = summaryMatch[1];
+
+    // Extract description from the object
+    const descriptionMatch = objectContent.match(
+      /description:\s*["']([\s\S]*?)["']/
+    );
+    if (descriptionMatch)
+      metadata.description = descriptionMatch[1].replace(/\s+/g, " ").trim();
+
+    // Extract operationId from the object
+    const operationIdMatch = objectContent.match(
+      /operationId:\s*["'](.*?)["']/
+    );
+    if (operationIdMatch) metadata.operationId = operationIdMatch[1];
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+/**
+ * Extract validation rules from compiled @Use decorator content
+ */
+function extractCompiledValidationRules(useContent: string): {
+  params?: ValidationRule[];
+  query?: ValidationRule[];
+  body?: ValidationRule[];
+} {
+  const validation: {
+    params?: ValidationRule[];
+    query?: ValidationRule[];
+    body?: ValidationRule[];
+  } = {};
+
+  // Extract validateParams rules from compiled format
+  const paramsMatch = useContent.match(
+    /validation_middleware_1\.validateParams\)\(\{\s*rules:\s*\[([\s\S]*?)\]/
+  );
+  if (paramsMatch) {
+    validation.params = parseValidationRules(paramsMatch[1]);
+  }
+
+  // Extract validateQuery rules from compiled format
+  const queryMatch = useContent.match(
+    /validation_middleware_1\.validateQuery\)\(\{\s*rules:\s*\[([\s\S]*?)\]/
+  );
+  if (queryMatch) {
+    validation.query = parseValidationRules(queryMatch[1]);
+  }
+
+  // Extract validateBody rules from compiled format
+  const bodyMatch = useContent.match(
+    /validation_middleware_1\.validateBody\)\(\{\s*rules:\s*\[([\s\S]*?)\]/
+  );
+  if (bodyMatch) {
+    validation.body = parseValidationRules(bodyMatch[1]);
+  }
+
+  return validation;
 }
 
 /**
@@ -220,23 +302,49 @@ async function extractRoutesFromFile(
     const routes: DiscoveredRoute[] = [];
 
     // Extract controller name and base path from @Router decorator
-    // Handle both static strings and buildRoute function calls
+    // Handle both TypeScript source and compiled formats automatically
     let basePath = "";
-    const staticRouterMatch = content.match(/@Router\(['"`]([^'"`]+)['"`]\)/);
-    const buildRouteMatch = content.match(
-      /@Router\(buildRoute\(['"`]([^'"`]+)['"`]\)\)/
-    );
 
-    if (staticRouterMatch) {
-      basePath = staticRouterMatch[1];
-      // If using path constraints, the full path is /api + controller path
-      if (basePath && !basePath.startsWith("/api")) {
-        basePath = `/api/${basePath}`;
+    // Detect if this is a compiled file by looking for __decorate patterns
+    const isCompiledFile =
+      content.includes("__decorate") && content.includes("express_1.");
+
+    if (isCompiledFile) {
+      // Handle compiled format: (0, express_1.Router)((0, apiPrefix_1.buildRoute)("v1/posts"))
+      const compiledBuildRouteMatch = content.match(
+        /\(0, express_1\.Router\)\(\(0, apiPrefix_1\.buildRoute\)\(['"`]([^'"`]+)['"`]\)\)/
+      );
+      const compiledStaticRouterMatch = content.match(
+        /\(0, express_1\.Router\)\(['"`]([^'"`]+)['"`]\)/
+      );
+
+      if (compiledBuildRouteMatch) {
+        const routePath = compiledBuildRouteMatch[1];
+        basePath = `/api/${routePath}`;
+      } else if (compiledStaticRouterMatch) {
+        basePath = compiledStaticRouterMatch[1];
+        if (basePath && !basePath.startsWith("/api")) {
+          basePath = `/api/${basePath}`;
+        }
       }
-    } else if (buildRouteMatch) {
-      // For buildRoute("v1/users") format, construct the full path
-      const routePath = buildRouteMatch[1];
-      basePath = `/api/${routePath}`;
+    } else {
+      // Handle TypeScript source format: @Router("path") or @Router(buildRoute("v1/users"))
+      const staticRouterMatch = content.match(/@Router\(['"`]([^'"`]+)['"`]\)/);
+      const buildRouteMatch = content.match(
+        /@Router\(buildRoute\(['"`]([^'"`]+)['"`]\)\)/
+      );
+
+      if (staticRouterMatch) {
+        basePath = staticRouterMatch[1];
+        // If using path constraints, the full path is /api + controller path
+        if (basePath && !basePath.startsWith("/api")) {
+          basePath = `/api/${basePath}`;
+        }
+      } else if (buildRouteMatch) {
+        // For buildRoute("v1/users") format, construct the full path
+        const routePath = buildRouteMatch[1];
+        basePath = `/api/${routePath}`;
+      }
     }
 
     // Extract controller class name
@@ -252,48 +360,101 @@ async function extractRoutesFromFile(
     }
 
     // Find all HTTP method decorators and their associated functions
-    // Updated regex to capture @Use decorator content for validation extraction
+    // Handle both TypeScript source and compiled formats automatically
     const methodRegex =
       /@(Get|Post|Put|Patch|Delete)\(([^)]*)\)\s*(@Use\s*\([\s\S]*?\)\s*)*async\s+(\w+)/g;
+    const compiledMethodRegex =
+      /__decorate\(\[\s*\(0, express_1\.(Get|Post|Put|Patch|Delete)\)\(([^)]*)\),?\s*\(0, express_1\.Use\)\(([\s\S]*?)\),?\s*__param[\s\S]*?\], (\w+Controller)\.prototype, "(\w+)"/g;
+
     let match;
 
-    while ((match = methodRegex.exec(content)) !== null) {
-      const [, httpMethod, routePath, useDecorator, functionName] = match;
-      // Clean up the routePath by removing quotes
-      const cleanRoutePath = (routePath || "").replace(/['"]/g, "");
-      const fullPath = basePath + cleanRoutePath;
+    if (isCompiledFile) {
+      // Use compiled format extraction
+      while ((match = compiledMethodRegex.exec(content)) !== null) {
+        const [
+          ,
+          httpMethod,
+          routePath,
+          useDecorator,
+          controllerClassName,
+          functionName,
+        ] = match;
+        // Clean up the routePath by removing quotes
+        const cleanRoutePath = (routePath || "").replace(/['"]/g, "");
+        const fullPath = basePath + cleanRoutePath;
 
-      // Extract validation rules and metadata from @Use decorator if present
-      let validation:
-        | {
-            params?: ValidationRule[];
-            query?: ValidationRule[];
-            body?: ValidationRule[];
-          }
-        | undefined;
-      let metadata:
-        | {
-            summary?: string;
-            description?: string;
-            tags?: string[];
-            operationId?: string;
-          }
-        | undefined;
-      if (useDecorator) {
-        validation = extractValidationRules(useDecorator);
-        metadata = extractEndpointMetadata(useDecorator);
+        // Extract validation rules and metadata from @Use decorator if present
+        let validation:
+          | {
+              params?: ValidationRule[];
+              query?: ValidationRule[];
+              body?: ValidationRule[];
+            }
+          | undefined;
+        let metadata:
+          | {
+              summary?: string;
+              description?: string;
+              tags?: string[];
+              operationId?: string;
+            }
+          | undefined;
+        if (useDecorator) {
+          validation = extractCompiledValidationRules(useDecorator);
+          metadata = extractCompiledEndpointMetadata(useDecorator);
+        }
+
+        routes.push({
+          method: httpMethod.toLowerCase(),
+          path: cleanRoutePath,
+          fullPath,
+          controllerName,
+          functionName,
+          entityName,
+          validation,
+          metadata,
+        });
       }
+    } else {
+      // Use TypeScript source format extraction
+      while ((match = methodRegex.exec(content)) !== null) {
+        const [, httpMethod, routePath, useDecorator, functionName] = match;
+        // Clean up the routePath by removing quotes
+        const cleanRoutePath = (routePath || "").replace(/['"]/g, "");
+        const fullPath = basePath + cleanRoutePath;
 
-      routes.push({
-        method: httpMethod.toLowerCase(),
-        path: cleanRoutePath,
-        fullPath,
-        controllerName,
-        functionName,
-        entityName,
-        validation,
-        metadata,
-      });
+        // Extract validation rules and metadata from @Use decorator if present
+        let validation:
+          | {
+              params?: ValidationRule[];
+              query?: ValidationRule[];
+              body?: ValidationRule[];
+            }
+          | undefined;
+        let metadata:
+          | {
+              summary?: string;
+              description?: string;
+              tags?: string[];
+              operationId?: string;
+            }
+          | undefined;
+        if (useDecorator) {
+          validation = extractValidationRules(useDecorator);
+          metadata = extractEndpointMetadata(useDecorator);
+        }
+
+        routes.push({
+          method: httpMethod.toLowerCase(),
+          path: cleanRoutePath,
+          fullPath,
+          controllerName,
+          functionName,
+          entityName,
+          validation,
+          metadata,
+        });
+      }
     }
 
     return routes;
@@ -499,7 +660,7 @@ export const generateDynamicOpenAPISpec = async (controllersDir?: string) => {
   const defaultControllersDir =
     controllersDir ||
     (process.env.NODE_ENV === "production"
-      ? path.join(__dirname, "../controllers")
+      ? path.join(process.cwd(), "dist/controllers")
       : path.join(process.cwd(), "src/controllers"));
 
   const controllerFiles = await discoverControllers(defaultControllersDir);
@@ -515,7 +676,7 @@ export const generateDynamicOpenAPISpec = async (controllersDir?: string) => {
     openapi: "3.0.0",
     info: {
       version: "1.0.0",
-      title: "Tiny Social Media API",
+      title: "MongoDB Tiny Social Media API",
       description: `RESTful API - ${allRoutes.length} endpoints from ${controllerFiles.length} controllers`,
     },
     paths: {} as any,
@@ -572,12 +733,15 @@ export const setupDynamicOpenAPI = async (
   // Add Scalar UI
   if (enableScalar) {
     try {
+      const { apiReference } = await import("@scalar/express-api-reference");
       app.use(
         docsPath,
         apiReference({
-          spec: { url: specPath },
+          spec: {
+            url: specPath,
+          },
           theme: "purple",
-        })
+        } as any)
       );
     } catch (error) {
       console.warn(
